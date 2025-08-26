@@ -1,0 +1,223 @@
+### Heat Transfer Simulation from a Laser Source ###
+
+This repository contains several programs developed to simulate heat transfer from a laser source over a material layer.
+
+## PARAMETERS
+
+Before running any job, you need to generate the constant files `constant.py`, `CONSTANT_DFLUX.inc` & `CONSTANT_UMATHT.inc`. To do so:
+1. Fill your temperature dependant material properties in the `thermal.csv`, `mechanic.csv` & `plastic.csv` files.
+  > ⚠️ Data must be ordered in ascending temperature.
+  > 📌 Note : If you only want to run a thermal simulation, leave `mechanic.csv` and `plastic.csv` blank.
+2. Run `main.py` by entering the following command in your terminal:
+  - ```cd C:/your/path/to/files``` to go to the folder that contains `main.py`
+  - ```python main.py``` to open the panel
+3. A control panel will appear with all adjustable parameters.
+  > 📌 Note :  units are SI units 
+4. Import `thermal.csv`, `mechanic.csv` & `plastic.csv`
+5. *Save* all constant files by clicking the corresponding buttons, then close the panel.
+6. Check that the files have been generated and ensure they are in the same folder as the other code files.
+
+> ⚠️ Some changes — such as modifying the laser power — may cause compilation issues if the simulation increments are no longer suitable.  
+In that case, consider adjusting the *Simulation* parameters in the Python file accordingly.
+> ✏️ Custom : Feel free to change the MESH_SIZE in the *Simulation* parameters in the Python file if you want coarser or finer results, but keep in mind that a finer mesh will increase computation time.
+
+_______________________________________________________
+
+## RUNNING SIMULATION
+
+Depending on the program, two simulation types are available:
+
+# 1. Python-only Simulation
+
+**Usage:**
+1. Open ABAQUS with *Standard Explicit Model* and select *File > Set Work Directory* to the folder containing the Python script and constant.py.
+2. Run the Python script via *File > Run Script* in ABAQUS.
+3. You can edit the data you want to extract in *Field* & *History Output*.
+4. Create the *Job* if none exists yet.
+5. Right-click the *Job* and select *Submit*.
+  > 🔧 _Ignore all control panel prompts by clicking *Yes*._
+  - It should be written "Submitted", then "Running".
+  > 🔧 *Aborted* : _check `yourjobname.msg` or `yourjobname.dat` files to see from where the issues come_
+
+6. Once "Completed", open your results in ABAQUS via: *Results > Output Databases > yourjobname.odb*
+
+> 📌 Note : You can check the ongoing simulation before completion by opening the .odb file.
+> 🔧 No worries If Abaqus closes while running, the job usually continues in the background (you can check if the .odb file size is increasing).
+
+# 2. Python with Fortran Subroutine
+
+**Usage:**
+1. Open ABAQUS with *Standard Explicit Model* and select *File > Set Work Directory* to the folder containing the Python script and constant.py.
+2. Run the Python script via *File > Run Script* in ABAQUS.
+3. You can edit the data you want to extract in *Field* & *History Output*.
+4. Create a *Job* if none exists yet.
+5. Right-click the Job and select *Write Input File*.
+6. Open your terminal (e.g., Intel OneAPI 2024), and navigate to the folder containing your .inp file and .f90 subroutine: 
+    ```cd C:/your/path/to/files```
+
+  > 📌 Note : If you don’t already have a Fortran compiler (supporting `.f90`), download one compatible version here:
+   [https://registrationcenter-download.intel.com/akdlm/IRC_NAS/3a64aab4-3c35-40ba-bc9c-f80f136a8005/w_fortran-compiler_p_2024.0.2.27_offline.exe]
+
+7. Run the simulation on the terminal with: 
+    ```abaqus job=yourjobname (without .inp at the end) user=subroutinename.f90 cpu=nb_cpu interactive```
+   If everything is configured properly, the terminal should display *Run standard.exe*.
+  > 🔧 *Abaqus/Analysis exited with errors* : _check `yourjobname.msg` or `yourjobname.dat` files to see from where the issues come_
+
+8. Wait until *JOB COMPLETED* appears on terminal.
+9. Open your results in Abaqus: *Results > Output Databases > yourjobname.odb*
+
+> 📌 Note : You can check the ongoing simulation before completion by opening the .odb file.
+
+
+____________________________________________________
+
+## THERMAL ANALYSIS
+
+# Surface Heat Flux
+
+**Procedure:** Python with Fortran Subroutine
+**Code:** `Code DFLUX_surface.py` & `LINE_surface.f90` or `ZIGZAG_surface.f90`
+**Basic Outputs:** Temperature (*NT11*) & State (*SDV*)
+
+The laser is modeled by a moving *Gaussian surface heat flux* given by the formula: 
+  Q_laser = 2 * P / (PI * R02) * EXP(-2 * r^2 / R^2)
+
+> 🔧 The "laser penetration depth" parameter is not relevant here and can be left blank in the parameters panel.
+
+The simulation represents a portion of a larger metal part printed using the LPBF method.  
+You can specify in the parameters:
+- The size of the portion to simulate
+- The number of layers
+- The size of the real part
+
+A solid base support is modeled to represent the already printed part below, allowing heat conduction (the interface in contact with the base plate of the printer is not simulated here).
+
+Phase changes are tracked and plotted using the *SDV* field output: 
+- Powder : SDV = 0 (blue)
+- Liquid : SDV = 1 (green)
+- Solid : SDV = 2 (red)
+
+> ⚠️ The first laser pass may appear not to melt the material completely. This is due to the part needing to adjust its body temperature.
+
+**Principle:**
+
+- Powder layers are activated sequentially.
+- The laser scans each layer using one of two possible patterns, causing the powder to melt and then solidify:
+  - *Straight-line path* (`LINE_surface.f90`):
+    -------------->
+    -------------->
+    -------------->
+  - *Zigzag path* (`ZIGZAG_surface.f90`):
+    -------------->
+    <--------------
+    -------------->
+- The real size of the part is considered by adding the equivalent scanning time of a full path as cooling time between passes.
+- An additional cooling time (user-defined) is applied between layers.
+- "Top convection" and "top radiation" are applied only to the surface exposed to ambient air. No heat flux is applied on the contours and bottom.
+
+> ✏️ Custom : In the `DFLUX` subroutine of the `.f90` file, you can: 
+  - Enable heat loss due to evaporation (*Q_evap*) — effect is minor (~2 K lower).  
+  - Modify the formula for the laser heat flux (*Q_laser*).
+
+**Limitations:**
+
+The Gaussian surface heat flux tends to produce unrealistically high temperature ranges compared to experimental data.
+
+
+---------------------------------
+
+# Volumetric Heat Flux
+
+**Procedure:** Python with Fortran Subroutine
+**Code:** `Code DFLUX_volume.py` & `LINE_volume.f90` or `ZIGZAG_volume.f90`
+**Basic Outputs:** Temperature (*NT11*) & State (*SDV*)
+
+The laser is modeled as a moving *Gaussian volumetric heat flux* given by the formula: 
+  Q_laser = 3 * P / (2 * PI * R02 * H) * EXP(- r^2 / R^2) * (1-(y/H)^2)
+
+> ✏️ Custom : *H* corresponds to the laser penetration depth. You can adjust it to match the real melt pool depth. 
+  The melt pool shape can be visualized in the *Results* via the *SDV* field output, where the liquid phase appears in green as the laser moves.  
+> ⚠️ Changing *H* affects both the shape and amplitude of the laser heat flux *Q_laser*, and therefore the overall temperature range.
+
+The simulation represents a portion of a larger metal part printed using the LPBF method.  
+You can specify in the parameters:
+- The size of the portion to simulate
+- The number of layers
+- The size of the real part
+
+A solid base support is modeled to represent the already printed part below, allowing heat conduction (the interface in contact with the base plate of the printer is not simulated here).
+
+Phase changes are tracked and plotted using the *SDV* field output: 
+- Powder : SDV = 0
+- Liquid : SDV = 1
+- Solid : SDV = 2
+
+> ⚠️ The first laser pass may appear not to melt the material completely. This is due to the part needing to adjust its body temperature.
+
+**Principle:**
+
+- Powder layers are activated sequentially.
+- The laser scans each layer using one of two possible patterns, causing the powder to melt and then solidify:
+  - *Straight-line path* (`LINE_volume.f90`):
+    -------------->
+    -------------->
+    -------------->
+  - *Zigzag path* (`ZIGZAG_volume.f90`):
+    -------------->
+    <--------------
+    -------------->
+- The real size of the part is considered by adding the equivalent scanning time of a full path as cooling time between passes.
+- An additional cooling time (user-defined) is applied between layers.
+- "Top convection" and "top radiation" are applied only to the surface exposed to ambient air. No heat flux is applied on the contours and bottom.
+
+> ✏️ Custom : In the `DFLUX` subroutine of the `.f90` file, you can: 
+  - Enable heat loss due to evaporation (*Q_evap*) — effect is minor (~2 K lower).  
+  - Modify the formula for the laser heat flux (*Q_laser*).
+
+**Limitations:**
+
+The penetration depth *H* is not a standard laser property available in databases.  
+It must be determined experimentally or estimated to achieve realistic simulation results.
+
+
+---------------------------------
+
+## MECHANICAL ANALYSIS
+
+**Procedure:** Python-only Simulation
+**Code:** `Code MECHA.py`
+**Basic Outputs:** Thermal Strain (*THE*), Displacement (*U*), ...
+
+Once you have run the thermal analysis, you just have to keep the `yourjobname.sta` and `yourjobname.obd` files, and the same `constant.py` file you used to perform the Mechanical analysis (you can keep the .msg and .inp if you want too).
+
+The mechanical analysis is performed using the temperature 
+
+____________________________________________________
+
+## ADDITIONAL CODES
+
+# Wire-Arc Simulation : Birth-Death Method
+
+**Procedure:** Python-only Simulation
+**Code:** `birth-death.py`
+**Basic Outputs:** Temperature (*NT11*)
+
+This approach simulates the progressive deposition of molten metal using the *Birth–Death* method, commonly described in the literature.
+A static gaussian surface heat flux is applied on one cell at a time :
+  Q_laser = 2 * P / (PI * R02) * EXP(-2 * r^2 / R^2)
+
+**Principle:**
+
+- Elements (cells) are activated sequentially at the laser's travel speed.  
+>📌 Note: Each element’s size corresponds to the *h-spacing* (or wire diameter).
+- Once activated, a Gaussian surface heat flux is applied to the element.
+- A cooling time is applied between each layer.
+- "Convection" and "radiation" are applied only to surfaces exposed to ambient air (contours and top surfaces).
+
+**Limitations:**
+
+This method is suitable for additive manufacturing processes involving continuous material deposition.  
+However:  
+- In powder-bed fusion, it does not capture the powder → liquid → solid phase transformation or the interaction with surrounding powder.  
+- The laser is applied point-by-point, rather than following a continuous scanning path.
+
